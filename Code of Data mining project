@@ -1,0 +1,367 @@
+# Index
+
+## Data Load
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import os, re, random
+
+import plotly
+import plotly.plotly as py
+import plotly.graph_objs as go
+import plotly.figure_factory as ff
+from plotly.widgets import GraphWidget
+plotly.tools.set_credentials_file(username='rambor12', api_key='BlHjLpOKpz5qwmtmkzI7') 
+#plotly.tools.set_credentials_file(username='rambor122', api_key='hmkBFAZeAx4ZTrkPtZtg')
+
+path = 'data\\'
+
+data = pd.read_csv(path+'traindataset.csv', encoding='euc-kr')
+score = pd.read_csv(path+'scoredataset.csv', encoding='euc-kr')
+
+model = {}
+
+## Data Cleansing
+def age_to_int(x):
+    if x == '미확':
+        return np.nan
+    else:
+        return int(x.replace('세',''))
+
+data['age_nm'] = data['age_nm'].apply(age_to_int)
+score['age_nm'] = score['age_nm'].apply(age_to_int)
+def grade_to_str(x):
+    if len(x) == 1:
+        return x + 'A'
+    else:
+        return x
+
+data['grade'] = data['grade'].apply(grade_to_str)
+score['grade'] = score['grade'].apply(grade_to_str)
+data.rename(columns={'intg_cust_id':'CUS_ID'}, inplace=True)
+data = data.set_index(['CUS_ID'])
+score.rename(columns={'intg_cust_id':'CUS_ID'}, inplace=True)
+score = score.set_index(['CUS_ID'])
+
+for i in range(12):
+    data.ix[:,i] = data.ix[:,i].astype('category')
+    score.ix[:,i] = score.ix[:,i].astype('category')
+    
+## Save to CSV
+
+def to_csv(clf, name=None):
+    if SAVE == True:
+        if name is None: 
+            name = re.search("\w*\(", str(clf)).group()[:-1]
+        
+        pred_y = clf.predict_proba(X_test)
+        res = pd.DataFrame(pred_y, index=test.index)
+        res.columns = [label_encoder.inverse_transform(i) for i in range(len(label_encoder.classes_))]
+        res.to_csv("result\\test\\"+name+'.csv')
+        
+        pred_y = clf.predict_proba(X_train)
+        res = pd.DataFrame(pred_y, index=train.index)
+        res.columns = [label_encoder.inverse_transform(i) for i in range(len(label_encoder.classes_))]
+        res.to_csv("result\\train\\"+name+'.csv')
+        
+        print('Saved')    
+
+# 1. Exploration
+
+def bar_chart(col, TG='grade', ratio=True, inverse=False):
+    trace = []
+    if inverse==True:
+        cnt = data.groupby([col])[TG].value_counts()
+    else:
+        cnt = data.groupby([TG])[col].value_counts()
+    if ratio == True:
+        cnt = cnt / cnt.groupby([cnt.index.get_level_values(0)]).sum()
+    for cat in set(cnt.index.get_level_values(1)):
+        buf = cnt.loc[:,cat]
+        y = pd.DataFrame(index=set(cnt.index.get_level_values(0))).sort_index().join(buf).fillna(0).ix[:,0]
+        trace.append(
+            go.Bar(
+            x=list(y.index),
+            y=list(y.values),
+            name=cat)
+        )
+    title = col + ' within ' + TG
+    if inverse==True:
+        title = TG + ' within ' + col
+    layout = go.Layout(
+        barmode='stack', height=500, width=1000, title = title
+    )
+    fig = go.Figure(data=trace, layout=layout)
+    
+    return fig
+    
+## 1.2 Correlation Matrix
+
+To get the correlation between categorical variable and numerical variable, we used correlation ratio  ηη  which is defined as,
+η2=σy⎯⎯⎯2σy2, where σy⎯⎯⎯2=∑xnx(y⎯⎯⎯x−y⎯⎯⎯)2∑xnx and σy2=∑x,i(yxi−y⎯⎯⎯)2n
+η2=σy¯2σy2, where σy¯2=∑xnx(y¯x−y¯)2∑xnx and σy2=∑x,i(yxi−y¯)2n
+ 
+For the correlation between categorical variables, we used phi coefficient  ϕϕ  or Matthews correlation coefficient(MCC),
+x=1x=0totaly=1n11n01n∙1y=0n10n00n∙0totaln1∙n0∙n
+y=1y=0totalx=1n11n10n1∙x=0n01n00n0∙totaln∙1n∙0n
+ 
+ϕ=n11n00−n10n01n1∙n0∙n∙0n∙1⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯√
+ϕ=n11n00−n10n01n1∙n0∙n∙0n∙1
+ 
+to see details, click here. Or you can use rank correlation such as spearman r, and so on.
+
+
+def corr_map(col, TG='grade'):
+    grade_cols = set(data[TG])
+    if type(data.ix[0,TG]) == str:
+        b = pd.get_dummies(data[TG])
+    else:
+        b = data[TG].to_frame()
+    if type(data.ix[0,col]) == str:
+        a = pd.get_dummies(data[col])
+    else:
+        a = data[col]
+    if not type(col) == list:
+        a = a.to_frame()
+    df = a.join(b).corr().filter(grade_cols).drop(grade_cols)
+    df = df.reindex_axis(sorted(df.columns), axis=1)
+    x = df.columns.tolist()
+    y = df.index.tolist()
+    z = np.round(df.values.tolist(),decimals=3)
+    fig = ff.create_annotated_heatmap(z, x=x, y=y, colorscale='Viridis',showscale=True)
+    fig.layout.title = 'corr ( ' + str(col) + ' vs ' + TG +' )'
+    height = 180*len(y) if len(y) < 5 else 90*len(y)
+    fig.layout.height = height if len(y) > 1 else 300
+    fig.layout.width = 900
+    return fig
+  
+# 2. Preprocessing
+data2 = data
+
+from sklearn.preprocessing import LabelEncoder
+
+label_encoder = LabelEncoder()
+label_encoder = label_encoder.fit(data['grade'])
+
+data2['BINARY'] = np.where(data2['grade'].isin(['1A','2A','3A']), 1, 0)
+data2['GRADE'] = label_encoder.transform(data2['grade'].values)
+
+ata2['age10-'] = np.where(data2['age_nm'].astype('int')<20, 1, 0)
+data2['age20']  = np.where((data2['age_nm'].astype('int')>=20)&(data2['age_nm'].astype('int')<25), 1, 0)
+data2['age25']  = np.where((data2['age_nm'].astype('int')>=25)&(data2['age_nm'].astype('int')<30), 1, 0)
+data2['age30']  = np.where((data2['age_nm'].astype('int')>=30)&(data2['age_nm'].astype('int')<40), 1, 0)
+data2['age40']  = np.where((data2['age_nm'].astype('int')>=40)&(data2['age_nm'].astype('int')<50), 1, 0)
+data2['age50']  = np.where((data2['age_nm'].astype('int')>=50)&(data2['age_nm'].astype('int')<60), 1, 0)
+data2['age60+'] = np.where(data2['age_nm'].astype('int')>=60, 1, 0)
+
+data2['card'] = np.where(data2['CustCol_9'] == '카드회원', 1, 0)
+
+data2 = data2.join(pd.get_dummies(data2['biz_catgry_nm']))
+data2 = data2.join(pd.get_dummies(data2['do_nm']))
+data2 = data2.join(pd.get_dummies(data2['hous_tp_nm']))
+data2 = data2.join(pd.get_dummies(data2['ym_nm']))
+
+data2 = data2.select_dtypes(exclude=['category']) 
+
+"Feature 총 갯수 : " + str(len(data2.columns))
+
+from sklearn import model_selection
+
+train, test = model_selection.train_test_split(data2, test_size=0.2, random_state=1)
+train = train.sort_index()
+test = test.sort_index()
+TG = 'GRADE' # or BINARY
+SAVE = True
+
+X_train = train.drop(['GRADE', 'BINARY'], axis=1).values
+X_test = test.drop(['GRADE', 'BINARY'], axis=1).values
+
+y_train = train[TG]
+y_test = test[TG]
+
+from sklearn.preprocessing import StandardScaler 
+
+scaler = StandardScaler()  
+scaler.fit(X_train)
+X_train = scaler.transform(X_train)
+X_test = scaler.transform(X_test)
+
+from sklearn.decomposition import PCA
+
+print("Dim : "+str(X_train.shape[1])+" -> ",end='')
+pca = PCA(n_components=20)
+X_train = pca.fit_transform(X_train)
+X_test = pca.transform(X_test)
+print(str(X_train.shape[1]))
+from sklearn.cluster import FeatureAgglomeration
+
+print("Dim : "+str(X_train.shape[1])+" -> ",end='')
+fa = FeatureAgglomeration()
+X_train = fa.fit_transform(X_train)
+X_test = fa.transform(X_test)
+print(str(X_train.shape[1]))
+
+from sklearn.feature_selection import VarianceThreshold
+print("Dim : "+str(X_train.shape[1])+" -> ",end='')
+vt = VarianceThreshold(threshold=(1)) # (.8*(1 - .8) # 1
+X_train = vt.fit_transform(X_train)
+X_test = vt.transform(X_test)
+print(str(X_train.shape[1]))
+
+from sklearn.ensemble import ExtraTreesClassifier
+from sklearn.feature_selection import SelectFromModel
+
+print("Dim : "+str(X_train.shape[1])+" -> ",end='')
+clf = ExtraTreesClassifier()
+clf = clf.fit(X_train, y_train)
+sfm = SelectFromModel(clf, prefit=True)
+X_test = sfm.transform(X_test)
+X_train = sfm.transform(X_train)
+print(str(X_train.shape[1]))
+
+# 3. Model
+
+from sklearn.metrics import accuracy_score, log_loss
+SAVE = True
+
+## 3.1 XGBoost
+
+import xgboost
+
+clf = xgboost.XGBClassifier(nthread=4)
+clf.fit(X_train, y_train)
+if test[TG].iloc[0] == 'FORBIDDEN':
+    y_pred = clf.predict(X_train)
+    predictions = [round(value) for value in y_pred]
+    accuracy = accuracy_score(y_train, predictions)
+    logloss = log_loss(y_train, clf.predict_proba(X_train)); to_csv(clf)
+    print("In Train Accuracy: %.2f%% \t Log Loss: %.3f" % (accuracy * 100.0, logloss))
+else:
+    y_pred = clf.predict(X_test)
+    predictions = [round(value) for value in y_pred]
+    accuracy = accuracy_score(y_test, predictions)
+    logloss = log_loss(y_test, clf.predict_proba(X_test)); to_csv(clf)
+    print("Accuracy: %.2f%% \t Log Loss: %.3f" % (accuracy * 100.0, logloss))
+print("Accuracy: %.2f%% \t Log Loss: %.3f" % (accuracy * 100.0, logloss))
+
+## 3.2 SVM
+from sklearn import svm
+
+clf = svm.SVC(kernel='rbf')
+clf.fit(X_train,y_train)
+if test[TG].iloc[0] == 'FORBIDDEN':
+    y_pred = clf.predict(X_train)
+    predictions = [round(value) for value in y_pred]
+    accuracy = accuracy_score(y_train, predictions)
+    print("In Train Accuracy: %.4f%%" % (accuracy * 100.0))
+else:
+    y_pred = clf.predict(X_test)
+    predictions = [round(value) for value in y_pred]
+    accuracy = accuracy_score(y_test, predictions)
+    print("Accuracy: %.4f%%" % (accuracy * 100.0))
+
+clf = svm.SVC(kernel='linear')
+clf.fit(X_train,y_train)
+if test[TG].iloc[0] == 'FORBIDDEN':
+    y_pred = clf.predict(X_train)
+    predictions = [round(value) for value in y_pred]
+    accuracy = accuracy_score(y_train, predictions)
+    print("In Train Accuracy: %.4f%%" % (accuracy * 100.0))
+else:
+    clf = svm.SVC(kernel='linear')
+    clf.fit(X_train,y_train)
+    y_pred = clf.predict(X_test)
+    predictions = [round(value) for value in y_pred]
+    accuracy = accuracy_score(y_test, predictions)
+    print("Accuracy: %.4f%%" % (accuracy * 100.0))
+    
+## 3.3 Neural Network
+
+from sklearn.neural_network import MLPClassifier
+
+for hidden in [(30,5) ,(10,5), (10,2), (5,5), (5,3), (5,10)]:
+    clf = MLPClassifier(solver='lbfgs', hidden_layer_sizes=hidden, random_state=3)
+    clf.fit(X_train,y_train)
+    if test[TG].iloc[0] == 'FORBIDDEN':
+        y_pred = clf.predict(X_train)
+        predictions = [round(value) for value in y_pred]
+        accuracy = accuracy_score(y_train, predictions)
+        logloss = log_loss(y_train, clf.predict_proba(X_train))
+        print("In Train Accuracy: %.2f%% \t Log Loss: %.4f" % (accuracy * 100.0, logloss))
+    else:
+        y_pred = clf.predict(X_test)
+        predictions = [round(value) for value in y_pred]
+        accuracy = accuracy_score(y_test, predictions)
+        logloss = log_loss(y_test, clf.predict_proba(X_test))
+        print("Accuracy: %.2f%% \t Log Loss: %.4f" % (accuracy * 100.0, logloss))
+        
+## 3.4 Ensemble
+from sklearn.ensemble import RandomForestClassifier
+
+clf = RandomForestClassifier()
+clf.fit(X_train,y_train)
+if test[TG].iloc[0] == 'FORBIDDEN':
+    y_pred = clf.predict(X_train)
+    predictions = [round(value) for value in y_pred]
+    accuracy = accuracy_score(y_train, predictions)
+    logloss = log_loss(y_test, clf.predict_proba(X_train)); to_csv(clf)
+    print("In Train Accuracy: %.2f%% \t Log Loss: %.4f" % (accuracy * 100.0, logloss))
+else:
+    y_pred = clf.predict(X_test)
+    predictions = [round(value) for value in y_pred]
+    accuracy = accuracy_score(y_test, predictions)
+    logloss = log_loss(y_test, clf.predict_proba(X_test)); to_csv(clf)
+    print("Accuracy: %.2f%% \t Log Loss: %.4f" % (accuracy * 100.0, logloss))
+    
+from sklearn.ensemble import ExtraTreesClassifier
+
+clf = ExtraTreesClassifier()
+clf.fit(X_train,y_train)
+if test[TG].iloc[0] == 'FORBIDDEN':
+    y_pred = clf.predict(X_train)
+    predictions = [round(value) for value in y_pred]
+    accuracy = accuracy_score(y_train, predictions)
+    logloss = log_loss(y_test, clf.predict_proba(X_train)); to_csv(clf)
+    print("In Train Accuracy: %.2f%% \t Log Loss: %.4f" % (accuracy * 100.0, logloss))
+else:
+    y_pred = clf.predict(X_test)
+    predictions = [round(value) for value in y_pred]
+    accuracy = accuracy_score(y_test, predictions)
+    logloss = log_loss(y_test, clf.predict_proba(X_test)); to_csv(clf)
+    print("Accuracy: %.2f%% \t Log Loss: %.4f" % (accuracy * 100.0, logloss))
+    
+from sklearn.ensemble import AdaBoostClassifier
+
+clf = AdaBoostClassifier()
+clf.fit(X_train,y_train)
+if test[TG].iloc[0] == 'FORBIDDEN':
+    y_pred = clf.predict(X_train)
+    predictions = [round(value) for value in y_pred]
+    accuracy = accuracy_score(y_train, predictions)
+    logloss = log_loss(y_test, clf.predict_proba(X_train)); to_csv(clf)
+    print("In Train Accuracy: %.2f%% \t Log Loss: %.4f" % (accuracy * 100.0, logloss))
+else:
+    y_pred = clf.predict(X_test)
+    predictions = [round(value) for value in y_pred]
+    accuracy = accuracy_score(y_test, predictions)
+    logloss = log_loss(y_test, clf.predict_proba(X_test)); to_csv(clf)
+    print("Accuracy: %.2f%% \t Log Loss: %.4f" % (accuracy * 100.0, logloss))
+    
+from sklearn.ensemble import GradientBoostingClassifier
+
+clf = GradientBoostingClassifier()
+clf.fit(X_train,y_train)
+if test[TG].iloc[0] == 'FORBIDDEN':
+    y_pred = clf.predict(X_train)
+    predictions = [round(value) for value in y_pred]
+    accuracy = accuracy_score(y_train, predictions)
+    logloss = log_loss(y_test, clf.predict_proba(X_train)); to_csv(clf)
+    print("In Train Accuracy: %.2f%% \t Log Loss: %.4f" % (accuracy * 100.0, logloss))
+else:
+    y_pred = clf.predict(X_test)
+    predictions = [round(value) for value in y_pred]
+    accuracy = accuracy_score(y_test, predictions)
+    logloss = log_loss(y_test, clf.predict_proba(X_test)); to_csv(clf)
+    print("Accuracy: %.2f%% \t Log Loss: %.4f" % (accuracy * 100.0, logloss))
+    
+res.to_csv('final_res.csv')
